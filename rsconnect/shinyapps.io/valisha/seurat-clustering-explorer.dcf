@@ -1,0 +1,10 @@
+name: seurat-clustering-explorer
+title: Universal Seurat Clustering Explorer
+username: valisha
+account: valisha
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 17086234
+bundleId: 11822734
+url: https://valisha.shinyapps.io/seurat-clustering-explorer/
+version: 1
