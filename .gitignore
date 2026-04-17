@@ -1,0 +1,13 @@
+.RData
+renv/library/
+renv/staging/
+renv/cache/
+*.rds
+*.rda
+*.h5
+*.h5ad
+*.loom
+*.mtx
+*.log
+*.tmp
+.DS_Store
