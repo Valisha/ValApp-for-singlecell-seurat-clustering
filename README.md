@@ -24,7 +24,15 @@ Access the app here:
 
 👉 http://implk-01:3838/
 
-⚠️ Note: Ensure you are on the same network or have proper access permissions.
+⚠️ Note: Only works for salk employees 😅
+
+⸻
+
+### Github Pages
+
+Access the app here:
+
+👉 [http://implk-01:3838/](https://valisha.github.io/ValApp-for-singlecell-seurat-clustering/)
 
 ⸻
 
