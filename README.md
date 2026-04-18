@@ -32,7 +32,7 @@ Access the app here:
 
 Access the app here:
 
-👉 [http://implk-01:3838/](https://valisha.github.io/ValApp-for-singlecell-seurat-clustering/)
+👉 https://valisha.github.io/ValApp-for-singlecell-seurat-clustering/
 
 ⸻
 
