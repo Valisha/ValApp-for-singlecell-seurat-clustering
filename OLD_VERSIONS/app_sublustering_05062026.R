@@ -360,15 +360,6 @@ ui <- fluidPage(
             plotOutput("guide_heatmap", height = "850px")
           ),
           tabPanel(
-            "Annotated clusters",
-            br(),
-            uiOutput("annot_cluster_col_ui"),
-            textInput("annot_gene", "Enter gene symbol", value = ""),
-            downloadButton("download_annot_violin", "Download violin plot"),
-            br(), br(),
-            plotOutput("annot_violin", height = "600px")
-          ),
-          tabPanel(
             "Metadata",
             br(),
             downloadButton("download_metadata", "Download metadata (.csv)"),
@@ -1587,83 +1578,7 @@ server <- function(input, output, session) {
       dev.off()
     }
   )
-  output$annot_cluster_col_ui <- renderUI({
-    req(rv$obj_clustered)
-    
-    md <- rv$obj_clustered@meta.data
-    
-    choices <- colnames(md)[vapply(md, function(x) {
-      is.factor(x) || is.character(x) || length(unique(x)) <= 50
-    }, logical(1))]
-    
-    selectInput(
-      "annot_cluster_col",
-      "Choose annotated cluster column",
-      choices = choices,
-      selected = if ("seurat_clusters" %in% choices) "seurat_clusters" else choices[1]
-    )
-  })
-  output$annot_violin <- renderPlot({
-    req(rv$obj_clustered, input$annot_cluster_col)
-    
-    obj <- rv$obj_clustered
-    annot_col <- input$annot_cluster_col
-    
-    validate(need(annot_col %in% colnames(obj@meta.data), paste("Column not found:", annot_col)))
-    
-    gene <- clean_character_vec(input$annot_gene)
-    validate(need(length(gene) > 0, "Enter a gene symbol."))
-    gene <- gene[1]
-    
-    validate(need(gene %in% rownames(obj), paste("Gene not found in object:", gene)))
-    
-    VlnPlot(
-      obj,
-      features = gene,
-      group.by = annot_col,
-      pt.size = 0.1
-    ) +
-      ggtitle(paste("Violin plot -", gene, "by", annot_col)) +
-      theme(
-        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
-        axis.title = element_blank(),
-        axis.text.x = element_text(angle = 45, hjust = 1)
-      )
-  })
-  output$download_annot_violin <- downloadHandler(
-    filename = function() {
-      paste0("annotated_cluster_violin_", input$annot_gene, "_", input$annot_cluster_col, "_", Sys.Date(), ".png")
-    },
-    content = function(file) {
-      req(rv$obj_clustered, input$annot_cluster_col)
-      
-      obj <- rv$obj_clustered
-      annot_col <- input$annot_cluster_col
-      
-      validate(need(annot_col %in% colnames(obj@meta.data), paste("Column not found:", annot_col)))
-      
-      gene <- clean_character_vec(input$annot_gene)
-      validate(need(length(gene) > 0, "Enter a gene symbol."))
-      gene <- gene[1]
-      
-      validate(need(gene %in% rownames(obj), paste("Gene not found in object:", gene)))
-      
-      p <- VlnPlot(
-        obj,
-        features = gene,
-        group.by = annot_col,
-        pt.size = 0.1
-      ) +
-        ggtitle(paste("Violin plot -", gene, "by", annot_col)) +
-        theme(
-          plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
-          axis.title = element_blank(),
-          axis.text.x = element_text(angle = 45, hjust = 1)
-        )
-      
-      ggsave(file, plot = p, width = 12, height = 7, dpi = 300)
-    }
-  )
 }
 
 shinyApp(ui = ui, server = server)
+

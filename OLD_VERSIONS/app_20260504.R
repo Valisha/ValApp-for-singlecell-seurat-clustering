@@ -1,59 +1,41 @@
-# ---- auto-install required packages if missing ----
-cran_packages <- c(
-  "shiny",
-  "Seurat",
-  "dplyr",
-  "ggplot2",
-  "patchwork",
-  "circlize",
-  "openxlsx",
-  "readxl",
-  "DT",
-  "tibble",
-  "scales"
+#! /opt/R/4.4.2/bin/R
+
+options(shiny.maxRequestSize = 5 * 1024^3)
+.libPaths(c(
+  "/opt/R/library/4.4",
+  "/opt/R/4.4.2/lib64/R/library"
+))
+# ---- CPU/thread controls ----
+phys_cores <- parallel::detectCores(logical = FALSE)
+use_workers <- min(16, max(1, phys_cores - 1))   # start conservative
+options(mc.cores = use_workers)
+Sys.setenv(
+  OMP_NUM_THREADS = "1",
+  OPENBLAS_NUM_THREADS = "1",
+  MKL_NUM_THREADS = "1",
+  BLIS_NUM_THREADS = "1",
+  VECLIB_MAXIMUM_THREADS = "1",
+  NUMEXPR_NUM_THREADS = "1"
 )
+suppressPackageStartupMessages({
+  library(shiny)
+  library(future)
+  library(Seurat)
+  library(dplyr)
+  library(ggplot2)
+  library(patchwork)
+  library(ComplexHeatmap)
+  library(circlize)
+  library(openxlsx)
+  library(readxl)
+  library(DT)
+  library(tibble)
+  library(scales)
+  library(grid)
+})
+future::plan(sequential)
+set.seed(100)
 
-bioc_packages <- c(
-  "ComplexHeatmap"
-)
-
-install_if_missing <- function(pkgs) {
-  missing_pkgs <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-  if (length(missing_pkgs) > 0) {
-    install.packages(missing_pkgs, repos = "https://cloud.r-project.org")
-  }
-}
-
-install_bioc_if_missing <- function(pkgs) {
-  missing_pkgs <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-  if (length(missing_pkgs) > 0) {
-    if (!requireNamespace("BiocManager", quietly = TRUE)) {
-      install.packages("BiocManager", repos = "https://cloud.r-project.org")
-    }
-    BiocManager::install(missing_pkgs, ask = FALSE, update = FALSE)
-  }
-}
-
-install_if_missing(cran_packages)
-install_bioc_if_missing(bioc_packages)
-
-# ---- load libraries ----
-library(shiny)
-library(Seurat)
-library(dplyr)
-library(ggplot2)
-library(patchwork)
-library(ComplexHeatmap)
-library(circlize)
-library(openxlsx)
-library(readxl)
-library(DT)
-library(tibble)
-library(scales)
-library(grid)
-
-options(shiny.maxRequestSize = 1024^3 * 2)
-set.seed(500)
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0 || identical(x, "")) y else x
 
@@ -185,66 +167,6 @@ make_goi_heatmap <- function(obj, genes, cluster_col, palette) {
   )
 }
 
-run_clustering_pipeline <- function(obj, dims_requested, res_vals, assay_use = NULL) {
-  req(obj)
-  
-  if (!is.null(assay_use) && assay_use %in% names(obj@assays)) {
-    DefaultAssay(obj) <- assay_use
-  }
-  
-  obj <- NormalizeData(obj, verbose = FALSE)
-  obj <- FindVariableFeatures(obj, verbose = FALSE)
-  obj <- ScaleData(obj, verbose = FALSE)
-  obj <- RunPCA(obj, npcs = max(dims_requested, 30), verbose = FALSE)
-  
-  available_pcs <- tryCatch(ncol(Embeddings(obj, "pca")), error = function(e) 0)
-  validate(need(available_pcs > 1, "PCA reduction is missing or has too few components."))
-  dims_use <- seq_len(min(dims_requested, available_pcs))
-  
-  if ("umap" %in% names(obj@reductions)) {
-    obj@reductions$umap <- NULL
-  }
-  obj <- RunUMAP(obj, dims = dims_use, verbose = FALSE)
-  
-  if (length(obj@graphs) > 0) {
-    obj@graphs <- list()
-  }
-  
-  obj <- FindNeighbors(
-    obj,
-    dims = dims_use,
-    assay = DefaultAssay(obj),
-    verbose = FALSE
-  )
-  
-  graph_candidates <- grep("_snn$", names(obj@graphs), value = TRUE)
-  graph_name <- paste0(DefaultAssay(obj), "_snn")
-  if (!graph_name %in% graph_candidates) {
-    graph_name <- if (length(graph_candidates) > 0) graph_candidates[1] else NULL
-  }
-  validate(need(!is.null(graph_name), "No SNN graph found after FindNeighbors."))
-  
-  obj <- tryCatch(
-    FindClusters(
-      obj,
-      graph.name = graph_name,
-      resolution = res_vals,
-      algorithm = 1,
-      verbose = FALSE
-    ),
-    error = function(e) {
-      stop(
-        paste0(
-          "FindClusters failed. Try lowering dims or resolutions. Details: ",
-          conditionMessage(e)
-        )
-      )
-    }
-  )
-  
-  list(obj = obj, dims_use = dims_use)
-}
-
 ui <- fluidPage(
   titlePanel("Universal Seurat Clustering Explorer"),
   sidebarLayout(
@@ -277,15 +199,7 @@ ui <- fluidPage(
         actionButton("run_pipeline", "Load / Recompute clustering", class = "btn-primary"),
         tags$hr(),
         
-        h4("3. Subcluster selected clusters"),
-        uiOutput("cluster_subset_ui"),
-        numericInput("sub_dims_use", "Subcluster dims", value = 20, min = 5, max = 100, step = 1),
-        textInput("sub_resolutions", "Subcluster resolutions", value = "0.1,0.2,0.3,0.4,0.5,0.6"),
-        actionButton("run_subcluster", "Subset selected clusters + subcluster", class = "btn-warning"),
-        actionButton("reset_to_full", "Reset to full object", class = "btn-default"),
-        tags$hr(),
-        
-        h4("4. Display settings"),
+        h4("3. Display settings"),
         uiOutput("resolution_ui"),
         numericInput("deg_top_n", "Top markers per cluster", value = 20, min = 5, max = 100, step = 5),
         numericInput("feature_ncol", "Columns for FeaturePlot/Violin grid", value = 4, min = 1, max = 8, step = 1),
@@ -294,7 +208,7 @@ ui <- fluidPage(
         actionButton("run_markers", "Run markers for selected resolution"),
         tags$hr(),
         
-        h4("5. Export analyzed object"),
+        h4("4. Export analyzed object"),
         downloadButton("download_seurat_object", "Download analyzed Seurat object"),
         tags$hr()
       )
@@ -360,15 +274,6 @@ ui <- fluidPage(
             plotOutput("guide_heatmap", height = "850px")
           ),
           tabPanel(
-            "Annotated clusters",
-            br(),
-            uiOutput("annot_cluster_col_ui"),
-            textInput("annot_gene", "Enter gene symbol", value = ""),
-            downloadButton("download_annot_violin", "Download violin plot"),
-            br(), br(),
-            plotOutput("annot_violin", height = "600px")
-          ),
-          tabPanel(
             "Metadata",
             br(),
             downloadButton("download_metadata", "Download metadata (.csv)"),
@@ -391,8 +296,6 @@ server <- function(input, output, session) {
     guide_gene_choices = NULL,
     guide_type_choices = NULL,
     markers = NULL,
-    subcluster_mode = FALSE,
-    subcluster_parent_clusters = NULL,
     status = "Upload a Seurat .rds file, then click 'Load / Recompute clustering'."
   )
   
@@ -427,25 +330,73 @@ server <- function(input, output, session) {
     }
     
     dims_use_requested <- input$dims_use
+    rv$status <- "Recomputing PCA / UMAP / neighbors / clustering..."
+    
+    obj <- NormalizeData(obj, verbose = FALSE)
+    obj <- FindVariableFeatures(obj, verbose = FALSE)
+    obj <- ScaleData(obj, verbose = FALSE)
+    obj <- RunPCA(obj, npcs = max(dims_use_requested, 30), verbose = FALSE)
+    
+    available_pcs <- tryCatch(ncol(Embeddings(obj, "pca")), error = function(e) 0)
+    validate(need(available_pcs > 1, "PCA reduction is missing or has too few components."))
+    dims_use <- seq_len(min(dims_use_requested, available_pcs))
+    
+    if ("umap" %in% names(obj@reductions)) {
+      obj@reductions$umap <- NULL
+    }
+    obj <- RunUMAP(obj, dims = dims_use, verbose = FALSE)
+    
+    if (length(obj@graphs) > 0) {
+      obj@graphs <- list()
+    }
+    
+    obj <- FindNeighbors(
+      obj,
+      dims = dims_use,
+      assay = DefaultAssay(obj),
+      verbose = FALSE
+    )
+    
     res_vals <- as.numeric(parse_csv(input$resolutions))
     res_vals <- res_vals[!is.na(res_vals)]
     validate(need(length(res_vals) > 0, "Please provide at least one valid resolution."))
     
-    rv$status <- "Recomputing PCA / UMAP / neighbors / clustering..."
-    ans <- run_clustering_pipeline(
-      obj = obj,
-      dims_requested = dims_use_requested,
-      res_vals = res_vals,
-      assay_use = DefaultAssay(obj)
+    graph_candidates <- grep("_snn$", names(obj@graphs), value = TRUE)
+    graph_name <- paste0(DefaultAssay(obj), "_snn")
+    if (!graph_name %in% graph_candidates) {
+      graph_name <- if (length(graph_candidates) > 0) graph_candidates[1] else NULL
+    }
+    validate(need(!is.null(graph_name), "No SNN graph found after FindNeighbors."))
+    
+    obj <- tryCatch(
+      FindClusters(
+        obj,
+        graph.name = graph_name,
+        resolution = res_vals,
+        algorithm = 1,
+        verbose = FALSE
+      ),
+      error = function(e) {
+        stop(
+          paste0(
+            "FindClusters failed. Try lowering dims or resolutions. Details: ",
+            conditionMessage(e)
+          )
+        )
+      }
     )
-    obj <- ans$obj
-    dims_use <- ans$dims_use
+    
+    for (r in res_vals) {
+      old <- paste0("RNA_snn_res.", sprintf("%.1f", r))
+      new <- paste0("RNA_snn_", sprintf("%.1f", r))
+      if (old %in% colnames(obj@meta.data)) {
+        obj@meta.data[[new]] <- obj@meta.data[[old]]
+      }
+    }
     
     rv$obj_base <- obj
     rv$obj_clustered <- obj
     rv$markers <- NULL
-    rv$subcluster_mode <- FALSE
-    rv$subcluster_parent_clusters <- NULL
     
     updateSelectInput(
       session,
@@ -510,81 +461,6 @@ server <- function(input, output, session) {
     recompute_pipeline(rv$obj_raw)
   }, ignoreInit = TRUE)
   
-  observeEvent(input$run_subcluster, {
-    req(rv$obj_clustered, input$resolution_pick, input$clusters_to_keep)
-    
-    parent_obj <- active_obj()
-    selected_clusters <- input$clusters_to_keep
-    selected_cells <- WhichCells(parent_obj, idents = selected_clusters)
-    
-    validate(need(length(selected_cells) > 20, "Too few cells selected for subclustering."))
-    
-    obj <- subset(parent_obj, cells = selected_cells)
-    DefaultAssay(obj) <- input$default_assay %||% DefaultAssay(obj)
-    
-    res_vals <- as.numeric(parse_csv(input$sub_resolutions))
-    res_vals <- res_vals[!is.na(res_vals)]
-    validate(need(length(res_vals) > 0, "Please provide at least one valid subcluster resolution."))
-    
-    rv$status <- paste0(
-      "Subclustering ", length(selected_cells), " cells from parent clusters: ",
-      paste(selected_clusters, collapse = ", "), "..."
-    )
-    
-    ans <- run_clustering_pipeline(
-      obj = obj,
-      dims_requested = input$sub_dims_use,
-      res_vals = res_vals,
-      assay_use = DefaultAssay(obj)
-    )
-    obj <- ans$obj
-    dims_use <- ans$dims_use
-    
-    obj$parent_clusters <- parent_obj@meta.data[colnames(obj), active_col()]
-    
-    rv$obj_clustered <- obj
-    rv$markers <- NULL
-    rv$subcluster_mode <- TRUE
-    rv$subcluster_parent_clusters <- selected_clusters
-    
-    updateSelectInput(
-      session,
-      "resolution_pick",
-      choices = fmt_res(res_vals),
-      selected = fmt_res(res_vals[1])
-    )
-    
-    rv$status <- paste0(
-      "Subclustered ", ncol(obj), " cells from parent clusters: ",
-      paste(selected_clusters, collapse = ", "),
-      ". Recomputed using PCs 1:", max(dims_use),
-      ". Available subcluster resolutions: ",
-      paste(fmt_res(res_vals), collapse = ", ")
-    )
-  })
-  
-  observeEvent(input$reset_to_full, {
-    req(rv$obj_base)
-    
-    rv$obj_clustered <- rv$obj_base
-    rv$markers <- NULL
-    rv$subcluster_mode <- FALSE
-    rv$subcluster_parent_clusters <- NULL
-    
-    cols <- grep("^RNA_snn_res\\.", colnames(rv$obj_clustered@meta.data), value = TRUE)
-    choices <- sort(unique(sub("^RNA_snn_res\\.", "", cols)))
-    validate(need(length(choices) > 0, "No full-object cluster resolution columns found."))
-    
-    updateSelectInput(
-      session,
-      "resolution_pick",
-      choices = choices,
-      selected = choices[1]
-    )
-    
-    rv$status <- "Reset to full clustered object."
-  })
-  
   output$guide_sheet_ui <- renderUI({
     req(input$guide_file)
     validate(need(!is.null(rv$guide_sheets) && length(rv$guide_sheets) > 0, "Could not read Excel sheets from guide file."))
@@ -629,30 +505,7 @@ server <- function(input, output, session) {
     selectInput("resolution_pick", "Resolution", choices = choices %||% fmt_res(0.6), selected = (choices %||% fmt_res(0.6))[1])
   })
   
-  output$cluster_subset_ui <- renderUI({
-    req(rv$obj_clustered, input$resolution_pick)
-    obj <- active_obj()
-    selectizeInput(
-      "clusters_to_keep",
-      "Choose clusters to subcluster",
-      choices = levels(Idents(obj)),
-      selected = NULL,
-      multiple = TRUE,
-      options = list(placeholder = "Select one or more clusters")
-    )
-  })
-  
-  output$status <- renderText({
-    mode_txt <- if (isTRUE(rv$subcluster_mode)) {
-      paste0(
-        "\nMode: SUBCLUSTERING. Parent clusters: ",
-        paste(rv$subcluster_parent_clusters %||% character(), collapse = ", ")
-      )
-    } else {
-      "\nMode: FULL OBJECT"
-    }
-    paste0(rv$status, mode_txt)
-  })
+  output$status <- renderText(rv$status)
   
   output$umap_sidebar <- renderPlot({
     req(rv$obj_clustered, input$resolution_pick)
@@ -820,8 +673,10 @@ server <- function(input, output, session) {
     
     obj_small <- subset(obj, cells = cells_keep)
     obj_small[[assay_use]] <- JoinLayers(obj_small[[assay_use]])
+    cat("Default assay before DE:", assay_use, "\n")
+    cat("Layers before JoinLayers:", Layers(obj_small[[assay_use]]), "\n")
     assay_use <- DefaultAssay(obj_small)
-    
+    cat("Layers after JoinLayers:", Layers(obj_small[[assay_use]]), "\n")
     markers_all <- tryCatch(
       FindAllMarkers(
         obj_small,
@@ -1150,8 +1005,7 @@ server <- function(input, output, session) {
   
   output$download_seurat_object <- downloadHandler(
     filename = function() {
-      prefix <- if (isTRUE(rv$subcluster_mode)) "subclustered_seurat_object_" else "analyzed_seurat_object_"
-      paste0(prefix, Sys.Date(), ".rds")
+      paste0("analyzed_seurat_object_", Sys.Date(), ".rds")
     },
     content = function(file) {
       req(rv$obj_clustered)
@@ -1585,83 +1439,6 @@ server <- function(input, output, session) {
       ht <- make_goi_heatmap(obj, genes, col, pal)
       draw(ht)
       dev.off()
-    }
-  )
-  output$annot_cluster_col_ui <- renderUI({
-    req(rv$obj_clustered)
-    
-    md <- rv$obj_clustered@meta.data
-    
-    choices <- colnames(md)[vapply(md, function(x) {
-      is.factor(x) || is.character(x) || length(unique(x)) <= 50
-    }, logical(1))]
-    
-    selectInput(
-      "annot_cluster_col",
-      "Choose annotated cluster column",
-      choices = choices,
-      selected = if ("seurat_clusters" %in% choices) "seurat_clusters" else choices[1]
-    )
-  })
-  output$annot_violin <- renderPlot({
-    req(rv$obj_clustered, input$annot_cluster_col)
-    
-    obj <- rv$obj_clustered
-    annot_col <- input$annot_cluster_col
-    
-    validate(need(annot_col %in% colnames(obj@meta.data), paste("Column not found:", annot_col)))
-    
-    gene <- clean_character_vec(input$annot_gene)
-    validate(need(length(gene) > 0, "Enter a gene symbol."))
-    gene <- gene[1]
-    
-    validate(need(gene %in% rownames(obj), paste("Gene not found in object:", gene)))
-    
-    VlnPlot(
-      obj,
-      features = gene,
-      group.by = annot_col,
-      pt.size = 0.1
-    ) +
-      ggtitle(paste("Violin plot -", gene, "by", annot_col)) +
-      theme(
-        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
-        axis.title = element_blank(),
-        axis.text.x = element_text(angle = 45, hjust = 1)
-      )
-  })
-  output$download_annot_violin <- downloadHandler(
-    filename = function() {
-      paste0("annotated_cluster_violin_", input$annot_gene, "_", input$annot_cluster_col, "_", Sys.Date(), ".png")
-    },
-    content = function(file) {
-      req(rv$obj_clustered, input$annot_cluster_col)
-      
-      obj <- rv$obj_clustered
-      annot_col <- input$annot_cluster_col
-      
-      validate(need(annot_col %in% colnames(obj@meta.data), paste("Column not found:", annot_col)))
-      
-      gene <- clean_character_vec(input$annot_gene)
-      validate(need(length(gene) > 0, "Enter a gene symbol."))
-      gene <- gene[1]
-      
-      validate(need(gene %in% rownames(obj), paste("Gene not found in object:", gene)))
-      
-      p <- VlnPlot(
-        obj,
-        features = gene,
-        group.by = annot_col,
-        pt.size = 0.1
-      ) +
-        ggtitle(paste("Violin plot -", gene, "by", annot_col)) +
-        theme(
-          plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
-          axis.title = element_blank(),
-          axis.text.x = element_text(angle = 45, hjust = 1)
-        )
-      
-      ggsave(file, plot = p, width = 12, height = 7, dpi = 300)
     }
   )
 }
