@@ -10,9 +10,7 @@ cran_packages <- c(
   "readxl",
   "DT",
   "tibble",
-  "scales",
-  "zellkonverter",
-  "SingleCellExperiment"
+  "scales"
 )
 
 bioc_packages <- c(
@@ -94,21 +92,6 @@ get_selected_guide_genes <- function(guide_df, gene_col, type_col = NULL, type_v
     genes <- intersect(genes, obj_features)
   }
   genes
-}
-
-load_uploaded_object <- function(datapath, filename) {
-  ext <- tolower(tools::file_ext(filename))
-  if (ext == "h5ad") {
-    tmp <- tempfile(fileext = ".h5ad")
-    file.copy(datapath, tmp, overwrite = TRUE)
-    sce <- zellkonverter::readH5AD(tmp)
-    seu <- Seurat::as.Seurat(sce, counts = "counts", data = NULL)
-    return(seu)
-  }
-  if (ext == "rds") {
-    return(readRDS(datapath))
-  }
-  stop("Unsupported file type. Please upload .h5ad or .rds")
 }
 
 extend_palette_to_idents <- function(obj) {
@@ -276,8 +259,7 @@ ui <- fluidPage(
         verbatimTextOutput("status"),
         
         h4("1. Upload files"),
-        # fileInput("seurat_rds", "Seurat object (.rds)", accept = c(".rds", ".Rds", ".RDS")),
-        fileInput("input_object", "Upload single-cell object", accept = c(".rds", ".h5ad")),
+        fileInput("seurat_rds", "Seurat object (.rds)", accept = c(".rds", ".Rds", ".RDS")),
         fileInput("guide_file", "Gene guide (.xlsx, optional)", accept = c(".xlsx")),
         uiOutput("guide_sheet_ui"),
         uiOutput("guide_gene_col_ui"),
@@ -314,7 +296,6 @@ ui <- fluidPage(
         
         h4("5. Export analyzed object"),
         downloadButton("download_seurat_object", "Download analyzed Seurat object"),
-        downloadButton("download_h5ad", "Download as .h5ad"),
         tags$hr()
       )
     ),
@@ -383,14 +364,8 @@ ui <- fluidPage(
             br(),
             uiOutput("annot_cluster_col_ui"),
             textInput("annot_gene", "Enter gene symbol", value = ""),
-            downloadButton("download_annot_umap", "Download annotated UMAP"),
-            downloadButton("download_annot_stacked_barplot", "Download annotated stacked barplot"),
             downloadButton("download_annot_violin", "Download violin plot"),
             br(), br(),
-            plotOutput("annot_umap", height = "700px"),
-            br(),
-            plotOutput("annot_stacked_barplot", height = "650px"),
-            br(),
             plotOutput("annot_violin", height = "600px")
           ),
           tabPanel(
@@ -420,12 +395,7 @@ server <- function(input, output, session) {
     subcluster_parent_clusters = NULL,
     status = "Upload a Seurat .rds file, then click 'Load / Recompute clustering'."
   )
-  uploaded_obj <- reactive({
-    req(input$input_object)
-    obj <- load_uploaded_object(input$input_object$datapath)
-    validate(need(inherits(obj, "Seurat"), "Uploaded file could not be converted to a Seurat object."))
-    obj
-  })
+  
   active_obj <- reactive({
     req(rv$obj_clustered, input$resolution_pick)
     at_res(rv$obj_clustered, input$resolution_pick)
@@ -435,16 +405,10 @@ server <- function(input, output, session) {
     req(input$resolution_pick)
     cluster_col_name(input$resolution_pick)
   })
-  validate_seurat_object <- function(obj) {
-    required <- c("nCount_RNA", "nFeature_RNA")
-    missing <- setdiff(required, colnames(obj@meta.data))
-    if (length(missing) > 0) {
-      warning("Missing metadata columns: ", paste(missing, collapse = ", "))
-    }
-    obj
-  }
+  
   recompute_pipeline <- function(obj_in) {
     req(obj_in)
+    
     obj <- obj_in
     DefaultAssay(obj) <- input$default_assay %||% DefaultAssay(obj)
     
@@ -517,16 +481,14 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$run_pipeline, {
-    req(input$input_object)
+    req(input$seurat_rds)
     
-    rv$status <- "Reading uploaded object..."
+    rv$status <- "Reading Seurat object..."
+    obj <- readRDS(input$seurat_rds$datapath)
     
-    obj <- load_uploaded_object(
-      datapath = input$input_object$datapath,
-      filename = input$input_object$name
-    )
-    
-    validate(need(inherits(obj, "Seurat"), "Uploaded file could not be converted to a Seurat object."))
+    if (!inherits(obj, "Seurat")) {
+      stop("Uploaded file is not a Seurat object")
+    }
     
     rv$obj_raw <- obj
     recompute_pipeline(rv$obj_raw)
@@ -809,17 +771,6 @@ server <- function(input, output, session) {
     
     p1 / p2
   })
-  
-  output$download_h5ad <- downloadHandler(
-    filename = function() {
-      paste0("analyzed_seurat_object_", Sys.Date(), ".h5ad")
-    },
-    content = function(file) {
-      req(rv$obj_clustered)
-      sce <- SingleCellExperiment::as.SingleCellExperiment(rv$obj_clustered)
-      zellkonverter::writeH5AD(sce, file = file)
-    }
-  )
   
   output$count_barplot <- renderPlot({
     obj <- active_obj()
@@ -1636,62 +1587,6 @@ server <- function(input, output, session) {
       dev.off()
     }
   )
-  output$annot_umap <- renderPlot({
-    req(rv$obj_clustered, input$annot_cluster_col)
-    
-    obj <- rv$obj_clustered
-    annot_col <- input$annot_cluster_col
-    
-    validate(need(annot_col %in% colnames(obj@meta.data), paste("Column not found:", annot_col)))
-    validate(need("umap" %in% names(obj@reductions), "UMAP reduction not found. Run clustering first."))
-    
-    DimPlot(
-      obj,
-      reduction = "umap",
-      group.by = annot_col,
-      pt.size = 0.7,
-      label = TRUE,
-      repel = TRUE
-    ) +
-      ggtitle(paste("UMAP by", annot_col)) +
-      theme(aspect.ratio = 1)
-  })
-  output$annot_stacked_barplot <- renderPlot({
-    req(rv$obj_clustered, input$annot_cluster_col)
-    
-    obj <- rv$obj_clustered
-    annot_col <- input$annot_cluster_col
-    origin_col <- input$origin_col
-    
-    validate(need(annot_col %in% colnames(obj@meta.data), paste("Column not found:", annot_col)))
-    validate(need(origin_col %in% colnames(obj@meta.data), paste("Condition column not found:", origin_col)))
-    
-    df <- obj@meta.data %>%
-      dplyr::filter(
-        !is.na(.data[[origin_col]]),
-        !is.na(.data[[annot_col]])
-      )
-    
-    ggplot(df, aes(x = .data[[origin_col]], fill = .data[[annot_col]])) +
-      geom_bar(position = "fill", color = "black") +
-      geom_text(
-        stat = "count",
-        aes(label = after_stat(count)),
-        position = position_fill(vjust = 0.5),
-        size = 3.5,
-        color = "black"
-      ) +
-      ylab("Fraction") +
-      xlab(NULL) +
-      ggtitle(paste("Annotated cluster proportions by condition -", annot_col)) +
-      theme_bw() +
-      theme(
-        axis.text.x = element_text(face = "bold", size = 12, angle = 45, hjust = 1),
-        axis.text.y = element_text(face = "bold", size = 12),
-        legend.title = element_blank(),
-        legend.text = element_text(size = 10)
-      )
-  })
   output$annot_cluster_col_ui <- renderUI({
     req(rv$obj_clustered)
     
@@ -1708,75 +1603,6 @@ server <- function(input, output, session) {
       selected = if ("seurat_clusters" %in% choices) "seurat_clusters" else choices[1]
     )
   })
-  output$download_annot_umap <- downloadHandler(
-    filename = function() {
-      paste0("annotated_cluster_umap_", input$annot_cluster_col, "_", Sys.Date(), ".png")
-    },
-    content = function(file) {
-      req(rv$obj_clustered, input$annot_cluster_col)
-      
-      obj <- rv$obj_clustered
-      annot_col <- input$annot_cluster_col
-      
-      validate(need(annot_col %in% colnames(obj@meta.data), paste("Column not found:", annot_col)))
-      
-      p <- DimPlot(
-        obj,
-        reduction = "umap",
-        group.by = annot_col,
-        pt.size = 0.7,
-        label = TRUE,
-        repel = TRUE
-      ) +
-        ggtitle(paste("UMAP by", annot_col)) +
-        theme(aspect.ratio = 1)
-      
-      ggsave(file, plot = p, width = 10, height = 8, dpi = 300)
-    }
-  )
-  output$download_annot_stacked_barplot <- downloadHandler(
-    filename = function() {
-      paste0("annotated_cluster_stacked_barplot_", input$annot_cluster_col, "_", Sys.Date(), ".png")
-    },
-    content = function(file) {
-      req(rv$obj_clustered, input$annot_cluster_col)
-      
-      obj <- rv$obj_clustered
-      annot_col <- input$annot_cluster_col
-      origin_col <- input$origin_col
-      
-      validate(need(annot_col %in% colnames(obj@meta.data), paste("Column not found:", annot_col)))
-      validate(need(origin_col %in% colnames(obj@meta.data), paste("Condition column not found:", origin_col)))
-      
-      df <- obj@meta.data %>%
-        dplyr::filter(
-          !is.na(.data[[origin_col]]),
-          !is.na(.data[[annot_col]])
-        )
-      
-      p <- ggplot(df, aes(x = .data[[origin_col]], fill = .data[[annot_col]])) +
-        geom_bar(position = "fill", color = "black") +
-        geom_text(
-          stat = "count",
-          aes(label = after_stat(count)),
-          position = position_fill(vjust = 0.5),
-          size = 3.5,
-          color = "black"
-        ) +
-        ylab("Fraction") +
-        xlab(NULL) +
-        ggtitle(paste("Annotated cluster proportions by condition -", annot_col)) +
-        theme_bw() +
-        theme(
-          axis.text.x = element_text(face = "bold", size = 12, angle = 45, hjust = 1),
-          axis.text.y = element_text(face = "bold", size = 12),
-          legend.title = element_blank(),
-          legend.text = element_text(size = 10)
-        )
-      
-      ggsave(file, plot = p, width = 12, height = 8, dpi = 300)
-    }
-  )
   output$annot_violin <- renderPlot({
     req(rv$obj_clustered, input$annot_cluster_col)
     
