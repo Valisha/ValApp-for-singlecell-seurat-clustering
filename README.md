@@ -38,35 +38,58 @@ Access the app here:
 
 ### 📦 Installation
 
-1. Clone the repository
+#### Clone the repository
 
+```
 git clone https://github.com/Valisha/ValApp-for-singlecell-seurat-clustering.git
 cd ValApp-for-singlecell-seurat-clustering
+```
 
-2. Install dependencies
+After cloning, there are multiple ways to run the server locally on your computer. In each case, once the the app is running, it should be available at https://0.0.0.0:3838/ .
 
-Make sure you have R (>= 4.4) installed.
+#### Option 1: Install and run with Pixi
 
+Pixi is an environment manager that ensures that the same set of package versions is used across installations. If you don't have Pixi yet, it can be obtained here: https://pixi.prefix.dev/latest/installation/ 
+
+Once you have Pixi, dependencies can be installed and this app can be started using:
+```
+pixi run start
+```
+
+#### Option 2: Install and run with Docker
+
+Docker provides a container that holds both an operating system and the dependencies of this app. You can obtain Docker Desktop here: https://www.docker.com/products/docker-desktop/ 
+
+Once installed, start the Docker app. Then, this app can be started using:
+```
+docker compose up -d
+```
+The first time the app is started, it may take a couple of minutes for dependencies to be installed within the container.
+
+The app can be stopped using
+```
+docker compose down
+```
+
+#### Option 3: Install dependencies and run in your local R environment
+
+Make sure you have R (>= 4.4) installed, then add additional dependencies with:
+
+```
 install.packages(c("shiny", "Seurat", "dplyr", "ggplot2", "patchwork", "circlize", "openxlsx", "readxl", "DT", "tibble", "scales"))
 
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 BiocManager::install("ComplexHeatmap")
+```
 
-
-⸻
-
-## ▶️ Running the App
-
-Option 1: Using script
-
+Once installed, the app can then be run locally using:
+```
 ./start_app.sh
-
-Option 2: Run manually in R
-
+```
+Or manually within R or Rstudio with:
+```
 shiny::runApp()
-
-
-⸻
+```
 
 ## ⚙️ Deployment (Shiny Server)
 

@@ -1,0 +1,14 @@
+services:
+  app:
+    image: ghcr.io/prefix-dev/pixi:latest
+    container_name: shiny-r-app
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3838
+    ports:
+      - "3838:3838"
+    command: ["pixi", "run", "start"]
+    restart: unless-stopped
