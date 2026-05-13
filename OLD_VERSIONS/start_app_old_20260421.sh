@@ -12,17 +12,8 @@ unset RENV_PATHS_CACHE || true
 unset RENV_CONFIG_SANDBOX_ENABLED || true
 unset RENV_PROJECT || true
 
-# ---- thread controls to avoid oversubscription ----
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export BLIS_NUM_THREADS=1
-export VECLIB_MAXIMUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
-
 exec R --vanilla -e "
 .libPaths(c('/opt/R/library/4.4', '/opt/R/4.4.2/lib64/R/library'));
 print(.libPaths());
-cat('physical cores:', parallel::detectCores(logical=FALSE), '\n');
-cat('logical cores:', parallel::detectCores(logical=TRUE), '\n');
-shiny::runApp('.', host='0.0.0.0', port=3838)"
+shiny::runApp('.', host='0.0.0.0', port=3838)
+"
